@@ -1,7 +1,5 @@
 import pandas as pd
-
-file_path = "[INPUT_FILE_PATH]"
-output_file = "[OUTPUT_FILE_PATH]"
+from paths import file_path, output_file
 
 raw_columns = [
     "userid", "timestamp", "musicbrainz-artist-id", 
@@ -11,7 +9,7 @@ raw_columns = [
 cols_to_use = ["artist-name", "track-name", "musicbrainz-track-id"]
 
 df = pd.read_csv(
-    file_path, 
+    file_path,
     sep='\t', 
     header=None, 
     names=raw_columns, 
