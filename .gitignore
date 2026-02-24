@@ -1,0 +1,7 @@
+/e4srec
+/new_dataset_creation/lastfm-dataset-1K.tar.gz
+/new_dataset_creation/lastfm-dataset-1K/README.txt
+/new_dataset_creation/lastfm-dataset-1K/userid-timestamp-artid-artname-traid-traname.tsv
+/new_dataset_creation/lastfm-dataset-1K/userid-profile.tsv
+/new_dataset_creation/lastfm-dataset-1K
+/new_dataset_creation/data_pipeline/output
