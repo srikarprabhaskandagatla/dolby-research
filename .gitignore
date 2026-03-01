@@ -1,10 +1,14 @@
 /e4srec
 
-/new_dataset_creation/lastfm-dataset-1K.tar.gz
-/new_dataset_creation/lastfm-dataset-1K/README.txt
-/new_dataset_creation/lastfm-dataset-1K/userid-timestamp-artid-artname-traid-traname.tsv
-/new_dataset_creation/lastfm-dataset-1K/userid-profile.tsv
-/new_dataset_creation/lastfm-dataset-1K
+/dataset/lastfm-dataset-1K/README.txt
+/dataset/lastfm-dataset-1K/userid-timestamp-artid-artname-traid-traname.tsv
+/dataset/lastfm-dataset-1K/userid-profile.tsv
+/dataset/lastfm-dataset-1K
 
-/new_dataset_creation/data_pipeline/output
-/new_dataset_creation/data_pipeline/paths.py
+/dataset/extract_audio_pipeline/output
+/dataset/extract_audio_pipeline/paths.py
+
+/dataset/extract_audio_pipeline/cookies.txt
+
+/dataset/extract_audio_pipeline/__pycache__/
+/dataset/extract_audio_pipeline/logs/
