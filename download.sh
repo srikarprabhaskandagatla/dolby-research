@@ -9,12 +9,13 @@
 #SBATCH --account=pi_dagarwal_umass_edu
 
 # Navigate to your project directory
-cd /work/pi_dagarwal_umass_edu/project_7/srikar/dolby-research/new_dataset_creation/data_pipeline/
+cd /work/pi_dagarwal_umass_edu/project_7/srikar/dolby-research/dataset/extract_audio_pipeline/
 
 # Load Conda and activate your specific environment
 module load conda/latest
 conda activate 698ds
 
 # Run the extraction script
-python extract_serial.py
+echo "Starting Last.fm dataset download..."
+python freq_rank_get_unique_tracks.py
 echo "Pipeline finished!"
