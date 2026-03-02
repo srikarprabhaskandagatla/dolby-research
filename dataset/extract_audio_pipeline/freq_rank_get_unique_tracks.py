@@ -28,7 +28,6 @@ def get_ordered_song_list(file_path):
     df['artist_name'] = df['artist_name'].str.replace(',', ';', regex=False).str.replace('"', '', regex=False)
     df['track_name'] = df['track_name'].str.replace(',', ';', regex=False).str.replace('"', '', regex=False)
     
-    print("Calculating song frequencies (Total Play Count)...")
     freq_table = df.groupby(['artist_name', 'track_name']).size().reset_index(name='play_count')
     
     # Sorting by frequency in descending order
