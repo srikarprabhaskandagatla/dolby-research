@@ -1,18 +1,17 @@
 import pandas as pd
 import csv
-from paths import file_path, output_file
+from paths import DATASET_PATH, CSV_FORMATTED_PATH
 
 def get_ordered_song_list(file_path):
     cols = ['userid', 'timestamp', 'artid', 'artist_name', 'traid', 'track_name']
     
-    # FIX: Add quoting=csv.QUOTE_NONE to stop pandas from swallowing multi-line strings
     df = pd.read_csv(
         file_path, 
         sep='\t', 
         header=None, 
         names=cols, 
         on_bad_lines='skip',
-        quoting=csv.QUOTE_NONE, # <-- This is the magic fix
+        quoting=csv.QUOTE_NONE,
         dtype=str
     )
     
@@ -35,7 +34,7 @@ def get_ordered_song_list(file_path):
     
     return freq_table_sorted
 
-ordered_songs_df = get_ordered_song_list(file_path)
+ordered_songs_df = get_ordered_song_list(DATASET_PATH)
 
 ordered_songs_df.insert(0, 'track_index', range(len(ordered_songs_df)))
-ordered_songs_df.to_csv(output_file, index=False)
+ordered_songs_df.to_csv(CSV_FORMATTED_PATH, index=False)
