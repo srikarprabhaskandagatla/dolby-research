@@ -12,3 +12,10 @@
 
 /dataset/extract_audio_pipeline/__pycache__/
 /dataset/extract_audio_pipeline/logs/
+
+/download_audio_embed.sh
+/download_audio_parallel.sh
+/csv_unique_tracks.sh
+/temp.sh
+
+/logs
