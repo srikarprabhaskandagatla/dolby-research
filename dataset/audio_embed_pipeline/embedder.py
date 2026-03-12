@@ -1,20 +1,3 @@
-"""
-embedder.py
-─────────────────────────────────────────────────────────────────────────────
-Handles all embedding operations for the pipeline:
-  - Load all 10 models once at startup (kept in memory for entire run)
-  - CLAP audio + text embedding helpers
-  - embed_track() — runs all 10 embedders on pre-loaded audio + lyrics
-  - .pt file helpers (load, append, check)
-
-Models:
-  Audio:  LAION-CLAP [512] | MERT [768] | Music2Vec [768] |
-          Encodec [128]    | MFCC [128]
-  Text:   MiniLM [384] | BGE-M3 [1024] | all-mpnet [768] |
-          multilingual-mpnet [768] | BERT [768]
-─────────────────────────────────────────────────────────────────────────────
-"""
-
 import gc
 import os
 
@@ -49,11 +32,7 @@ PT_FILES = {
     "text_bert":         os.path.join(OUTPUT_DIR, "text_bert.pt"),
 }
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # .pt FILE HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
-
 def load_pt(path: str) -> dict:
     """Load an existing .pt store, or return a fresh empty one."""
     if os.path.exists(path):
