@@ -1,10 +1,6 @@
-import gc
-import os
-
-import librosa
+import gc, os, librosa, torch, whisper
 import numpy as np
-import torch
-import whisper
+
 from transformers import (
     AutoModel, AutoProcessor,
     BertModel, BertTokenizer,
