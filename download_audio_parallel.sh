@@ -12,8 +12,6 @@ cd /work/pi_dagarwal_umass_edu/project_7/srikar/dolby-research/new_dataset_creat
 module load conda/latest
 conda activate 698ds
 
-# Create logs directory
 mkdir -p logs
 
-# Run with array ID
 python extract_parallel_new.py $SLURM_ARRAY_TASK_ID

@@ -7,15 +7,17 @@
 
 /dataset/extract_audio_pipeline/output
 /dataset/extract_audio_pipeline/paths.py
-
 /dataset/extract_audio_pipeline/cookies.txt
-
 /dataset/extract_audio_pipeline/__pycache__/
 /dataset/extract_audio_pipeline/logs/
+/dataset/extract_audio_pipeline/full_pipeline_overall.py
 
 /download_audio_embed.sh
 /download_audio_parallel.sh
+/runarray.sh
 /csv_unique_tracks.sh
 /temp.sh
+
+/dataset/audio_embed_pipeline/__pycache__
 
 /logs
