@@ -13,7 +13,7 @@
 /dataset/extract_audio_pipeline/full_pipeline_overall.py
 
 /download_audio_embed.sh
-/download_audio_parallel.sh
+/download_audio_parall_l.sh
 /runarray.sh
 /csv_unique_tracks.sh
 /temp.sh
