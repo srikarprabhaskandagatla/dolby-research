@@ -5,7 +5,6 @@ from paths import OUTPUT_DIR
 TEMP_AUDIO_DIR = os.path.join(OUTPUT_DIR, "tmp_audio")
 os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 
-
 def search_youtube(artist: str, track: str):
     # Returns the first result dict (contains videoId, title, etc.) or None
     ytmusic = YTMusic()
@@ -34,7 +33,7 @@ def download_wav(video_url: str, track_id) -> tuple:
         duration = info.get("duration", 0)
         wav_path = os.path.splitext(ydl.prepare_filename(info))[0] + ".wav"
 
-    # FFmpeg sometimes names the file differently — search for it
+    # FFmpeg sometimes names the file differently - search for it
     if not os.path.exists(wav_path):
         candidates     = glob.glob(os.path.join(TEMP_AUDIO_DIR, f"{track_id}.*"))
         wav_candidates = [f for f in candidates if f.endswith(".wav")]

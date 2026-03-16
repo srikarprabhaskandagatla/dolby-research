@@ -1,6 +1,9 @@
 import gc, os, librosa, torch, whisper
 import numpy as np
 
+import sys
+sys.path.append("/work/pi_dagarwal_umass_edu/project_7/srikar/dolby-research/dataset/extract_audio_pipeline")
+
 from transformers import (
     AutoModel, AutoProcessor,
     BertModel, BertTokenizer,
@@ -14,7 +17,7 @@ from paths import OUTPUT_DIR
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# 10 output .pt files — one per embedder
+# 10 output .pt files - one per embedder
 PT_FILES = {
     "audio_clap":        os.path.join(OUTPUT_DIR, "audio_clap.pt"),
     "audio_mert":        os.path.join(OUTPUT_DIR, "audio_mert.pt"),
@@ -235,19 +238,19 @@ def embed_track(audio_48k: np.ndarray, audio_24k: np.ndarray,
         dtype=torch.float32
     )[:128]
 
-    # T1: MiniLM — 384-dim
+    # T1: MiniLM - 384-dim
     print(f"    [T1] MiniLM text (384-dim)")
     embeddings["text_minilm"] = torch.tensor(
         m["minilm"].encode(lyrics), dtype=torch.float32
     )
 
-    # T2: BGE-M3 — 1024-dim
+    # T2: BGE-M3 - 1024-dim
     print(f"    [T2] BGE-M3 text (1024-dim)")
     embeddings["text_bgem3"] = torch.tensor(
         m["bgem3"].encode(lyrics), dtype=torch.float32
     )
 
-    # T3: all-mpnet — 768-dim
+    # T3: all-mpnet - 768-dim
     print(f"    [T3] all-mpnet text (768-dim)")
     embeddings["text_mpnet"] = torch.tensor(
         m["mpnet"].encode(lyrics), dtype=torch.float32

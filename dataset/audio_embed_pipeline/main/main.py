@@ -22,7 +22,7 @@ MASTER_LYRICS_PATH = os.path.join(OUTPUT_DIR, "master_lyrics.csv")
 
 
 if __name__ == "__main__":
-    input_df = pd.read_csv(CSV_SESSION_UNIQUE_TRACKS_PATH, nrows = 10) # remove nrows= for full run
+    input_df = pd.read_csv(CSV_SESSION_UNIQUE_TRACKS_PATH, nrows = 10) # remove nrows = for full run
     track_df = (
         input_df[["track_index", "artist_name", "track_name"]]
         .drop_duplicates(subset=["track_index"])
@@ -72,7 +72,7 @@ if __name__ == "__main__":
             # Step 3: Download WAV
             print(f"  [3] Downloading WAV")
             wav_path, duration = download_wav(video_url, track_id)
-            print(f"  [3] Downloaded ({duration}s) → {wav_path}")
+            print(f"  [3] Downloaded ({duration}s) to {wav_path}")
 
             # Step 3b: Pre-load audio into RAM at all 3 sample rates as no disk is needed after.
             print(f"  [3b] Pre-loading audio at 48 / 24 / 16 kHz into RAM")
@@ -82,10 +82,10 @@ if __name__ == "__main__":
             print(f"  [3b] Audio in RAM.")
 
             # Step 4: Whisper ASR (still needs wav_path on disk)
-            print(f"  [4] Whisper ASR...")
+            print(f"  [4] Whisper ASR")
             asr    = models["whisper"].transcribe(wav_path, fp16=(device == "cuda"))
             lyrics = asr["text"].strip() or "[Instrumental]"
-            print(f"  [4] Lyrics: {lyrics[:80]}{'...' if len(lyrics) > 80 else ''}")
+            print(f"  [4] Lyrics: {lyrics[:80]}{'' if len(lyrics) > 80 else ''}")
 
             # Step 5: CLAP cross-modal alignment score
             # Cosine similarity in CLAP's 512-dim space.
@@ -101,11 +101,11 @@ if __name__ == "__main__":
             print(f"  [5] CLAP alignment: {score:.4f}")
 
             # Step 6: Run all 10 embedders on pre-loaded audio + lyrics
-            print(f"  [6] Running all 10 embedders...")
+            print(f"  [6] Running all 10 embedders")
             embeddings = embed_track(audio_48k, audio_24k, audio_16k, lyrics, models)
 
             # Step 7: Append each embedding to its growing .pt file
-            print(f"  [7] Appending to 10 .pt files...")
+            print(f"  [7] Appending to 10 .pt files")
             for name, emb in embeddings.items():
                 append_pt(PT_FILES[name], track_id, artist, track, emb)
                 print(f"      {name:22s} {list(emb.shape)}")

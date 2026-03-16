@@ -14,9 +14,9 @@
 
 /download_audio_embed.sh
 /download_audio_parall_l.sh
-/runarray.sh
+/embed_audio_parall_l.sh
 /csv_unique_tracks.sh
-/temp.sh
+/test.sh
 
 /dataset/audio_embed_pipeline/__pycache__
 
