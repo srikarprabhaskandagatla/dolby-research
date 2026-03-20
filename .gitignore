@@ -1,5 +1,3 @@
-/e4srec
-
 /dataset/lastfm-dataset-1K/README.txt
 /dataset/lastfm-dataset-1K/userid-timestamp-artid-artname-traid-traname.tsv
 /dataset/lastfm-dataset-1K/userid-profile.tsv
@@ -7,7 +5,7 @@
 
 /dataset/extract_audio_pipeline/output
 /dataset/extract_audio_pipeline/paths.py
-/dataset/extract_audio_pipeline/cookies.txt
+/dataset/extract_audio_pipeline/cookies/
 /dataset/extract_audio_pipeline/__pycache__/
 /dataset/extract_audio_pipeline/logs/
 /dataset/extract_audio_pipeline/full_pipeline_overall.py
@@ -21,3 +19,10 @@
 /dataset/audio_embed_pipeline/__pycache__
 
 /logs
+
+/final.py
+/final.sh
+
+/dataset/hmagapu_output
+
+/trash
