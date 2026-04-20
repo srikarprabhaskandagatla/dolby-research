@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import re
+import pandas as pd
+
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--part", type=int, default=0, choices=[0, 1],
+                    help="0 = first 25K tracks, 1 = second 25K tracks")
+args = parser.parse_args()
+
+MODEL_PATH = "/work/pi_dagarwal_umass_edu/project_7/srikar/models/qwen2.5-7b-instruct"
+INPUT_CSV  = "/work/pi_dagarwal_umass_edu/project_7/hmagapu/metadata/shared/top_50k_songs.csv"
+OUTPUT_DIR = "/work/pi_dagarwal_umass_edu/project_7/srikar/dolby-research/metadata/metadata_output_v2"
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+COMPOSITION_FEATURES = [
+    "Focus on Lead Vocal",
+    "Focus on Lyrics",
+    "Focus on Melody",
+    "Focus on Vocal Accompaniment",
+    "Focus on Rhythmic Groove",
+    "Focus on Musical Arrangements",
+    "Focus on Form",
+    "Focus on Riffs",
+    "Focus on Performance",
+]
+
+FEATURE_DEFINITIONS = {
+    "Focus on Lead Vocal": (
+        "How compositionally dominant the lead vocal is in the overall track experience. "
+        "0.0=lead vocal is absent or negligible, 1.0=track is entirely vocal-driven."
+    ),
+    "Focus on Lyrics": (
+        "How compositionally dominant the lyrical content is in the overall track experience. "
+        "0.0=no lyrics or completely unimportant, 1.0=lyrics are the central experience."
+    ),
+    "Focus on Melody": (
+        "How compositionally dominant the melody is in the overall track experience. "
+        "0.0=no discernible melody, 1.0=melody is the defining element."
+    ),
+    "Focus on Vocal Accompaniment": (
+        "How compositionally dominant backing or harmony vocals are in the overall track experience. "
+        "0.0=no backing vocals, 1.0=backing vocals are as prominent as lead."
+    ),
+    "Focus on Rhythmic Groove": (
+        "How compositionally dominant the rhythmic feel or groove is in the overall track experience. "
+        "0.0=no rhythmic emphasis, 1.0=groove is the entire purpose of the track."
+    ),
+    "Focus on Musical Arrangements": (
+        "How compositionally dominant the arrangement is, including instrument count and "
+        "quality/novelty of part-writing and orchestration. "
+        "0.0=minimal/bare arrangement, 1.0=arrangement is the defining compositional achievement."
+    ),
+    "Focus on Form": (
+        "How compositionally dominant the form is. "
+        "0.0=standard/simple form (verse-chorus), 1.0=highly complex or non-traditional form."
+    ),
+    "Focus on Riffs": (
+        "How compositionally dominant repeated instrumental melodic motifs (riffs) are "
+        "in the overall track experience. "
+        "0.0=no riffs, 1.0=riff-driven track where the riff defines the song identity."
+    ),
+    "Focus on Performance": (
+        "How compositionally dominant instrumental performance skill is in the overall track experience. "
+        "0.0=performance skill is irrelevant, 1.0=virtuosity is the primary attraction (jazz, classical)."
+    ),
+}
+
+SYSTEM_PROMPT = (
+    "You are a music analyst. Output ONLY a valid JSON object with float scores 0.0–1.0. "
+    "No explanation, no markdown, no extra text before or after the JSON."
+)
+
+
+def build_prompt(artist: str, title: str) -> list[dict]:
+    keys_str = '", "'.join(COMPOSITION_FEATURES)
+    feature_block = "\n".join(
+        f'- "{feat}": {FEATURE_DEFINITIONS[feat]}'
+        for feat in COMPOSITION_FEATURES
+    )
+    user_content = (
+        f'Track: "{title}" by {artist}\n\n'
+        f'Rate each compositional feature 0.0–1.0 (continuous float) based on your knowledge of this track. '
+        f'If the composition cannot be inferred confidently, prefer moderate scores (0.4–0.6) '
+        f'instead of inventing details.\n\n'
+        f'{feature_block}\n\n'
+        f'Return a JSON object with exactly these keys: "{keys_str}"'
+    )
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": user_content},
+    ]
+
+
+_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def extract_json(text: str) -> dict | None:
+    text = text.strip()
+    if text and not text.startswith("{"):
+        text = "{" + text
+    for candidate in [text, _JSON_RE.search(text) and _JSON_RE.search(text).group()]:
+        if not candidate:
+            continue
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            try:
+                return json.loads(candidate.rstrip(",") + "}")
+            except json.JSONDecodeError:
+                pass
+    return None
+
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+tokenizer.padding_side = "left"
+
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH,
+    torch_dtype=torch.bfloat16,
+    device_map="auto",
+    trust_remote_code=True,
+)
+model.eval()
+
+print(f"Model loaded on: {next(model.parameters()).device}\n")
+
+BATCH_SIZE = 8
+MAX_NEW_TOKENS = 384
+
+
+def annotate_batch(rows: list[dict]) -> list[dict | None]:
+    prompts = [build_prompt(r["artist_name"], r["track_name"]) for r in rows]
+    texts = [
+        tokenizer.apply_chat_template(p, tokenize=False, add_generation_prompt=True)
+        for p in prompts
+    ]
+    encodings = tokenizer(
+        texts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=2048,
+    ).to(model.device)
+
+    with torch.no_grad():
+        output_ids = model.generate(
+            **encodings,
+            max_new_tokens=MAX_NEW_TOKENS,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    prompt_len = encodings["input_ids"].shape[1]
+    results = []
+    for i, ids in enumerate(output_ids):
+        raw_text = tokenizer.decode(ids[prompt_len:], skip_special_tokens=True)
+        scores = extract_json(raw_text)
+
+        if scores is None:
+            print(f"JSON parse failed for: {rows[i]['track_name']} — raw: {raw_text[:120]}")
+            results.append(None)
+            continue
+
+        normalized = {}
+        ok = True
+        for feat in COMPOSITION_FEATURES:
+            val = scores.get(feat)
+            if val is None:
+                print(f"Missing key '{feat}' for: {rows[i]['track_name']}")
+                ok = False
+                break
+            try:
+                normalized[feat] = float(val) / 5.0
+            except (TypeError, ValueError):
+                print(f"Non-numeric value '{val}' for feature '{feat}'")
+                ok = False
+                break
+
+        results.append(normalized if ok else None)
+
+    return results
+
+
+CHECKPOINT_EVERY = 10_000
+
+print("Loading full input data")
+full_df = pd.read_csv(INPUT_CSV)
+
+half = len(full_df) // 2
+if args.part == 0:
+    part_df = full_df.iloc[:half]
+else:
+    part_df = full_df.iloc[half:]
+
+csv_path = os.path.join(OUTPUT_DIR, f"composition_features_part{args.part}.csv")
+
+if os.path.exists(csv_path):
+    done_df = pd.read_csv(csv_path)
+    done_keys = set(zip(done_df["artist_name"], done_df["track_name"]))
+    print(f"Resuming: {len(done_keys)} tracks already done, skipping them.")
+else:
+    done_keys = set()
+
+all_rows = [r for r in part_df.to_dict("records")
+            if (r["artist_name"], r["track_name"]) not in done_keys]
+
+print(f"Part {args.part}: {len(all_rows)} tracks remaining\n")
+
+checkpoint_buf = []
+
+for batch_start in range(0, len(all_rows), BATCH_SIZE):
+    batch = all_rows[batch_start : batch_start + BATCH_SIZE]
+    batch_results = annotate_batch(batch)
+
+    for row, scores in zip(batch, batch_results):
+        if scores is not None:
+            entry = {"artist_name": row["artist_name"], "track_name": row["track_name"]}
+            entry.update(scores)
+            checkpoint_buf.append(entry)
+
+    completed = min(batch_start + BATCH_SIZE, len(all_rows))
+    print(f"  [{completed}/{len(all_rows)}] completed")
+
+    if len(checkpoint_buf) >= CHECKPOINT_EVERY:
+        write_header = not os.path.exists(csv_path)
+        pd.DataFrame(checkpoint_buf).to_csv(csv_path, mode="a", index=False, header=write_header)
+        print(f"  ✓ Checkpoint saved ({len(checkpoint_buf)} rows) → {csv_path}")
+        checkpoint_buf = []
+
+if checkpoint_buf:
+    write_header = not os.path.exists(csv_path)
+    pd.DataFrame(checkpoint_buf).to_csv(csv_path, mode="a", index=False, header=write_header)
+    print(f"  ✓ Final checkpoint saved ({len(checkpoint_buf)} rows) → {csv_path}")
+
+print(f"\n✓ Part {args.part} done. Output: {csv_path}")

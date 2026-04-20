@@ -20,9 +20,23 @@
 
 /logs
 
-/final.py
-/final.sh
+/scripts
+
+/downloader.sh
 
 /dataset/hmagapu_output
 
 /trash
+
+metadata/logs
+metadata/scripts
+metadata/metadata_output_v2
+
+dataset/extract_lyrics_pipeline/lyrics.sh
+
+finetune/finetune.sh
+
+models
+
+
+/.claude

@@ -1,11 +1,10 @@
 """
 embedder.py
 ───────────
-Distributed embedding pipeline for batch_2 (60 000 tracks, 12 data nodes).
+Distributed embedding pipeline.  One embedder type per SLURM array task.
 
-Audio embedders (0–4) support 4 parallel sub-nodes each → 20 SLURM jobs.
-Text  embedders (5–9) run as a single job each          →  5 SLURM jobs.
-                                                    Total: 25 SLURM jobs.
+Each job (array index 0–9) loads a single model, scans all 10 data nodes
+(50 000 tracks total), and writes embeddings to its own output sub-folder.
 
   EMBEDDER_ID  Name                  Modality  SR       Dim
   ───────────  ────────────────────  ────────  ──────   ────
@@ -20,19 +19,22 @@ Text  embedders (5–9) run as a single job each          →  5 SLURM jobs.
   8            text_multilingual     text      —        768
   9            text_bert             text      —        768
 
-Audio sub-node output (per embedder, per sub-node):
-  embeddings/batch_2/node_{EMBEDDER_ID}/embeddings_sub_{SUB_NODE}.csv
-  embeddings/batch_2/node_{EMBEDDER_ID}/{emb_name}_{track_id}.pt
+Input sources (all batch_1):
+  Audio WAVs : /scratch3/.../raw_audio_files/batch_1/node_{N}/{track_id}.wav
+  Status CSV : /scratch3/.../raw_audio_files/batch_1/download_status_node_{N}.csv
+  Lyrics CSV : /scratch3/.../lyrics/batch_1/master_lyrics_node_{N}.csv
 
-Text output:
-  embeddings/batch_2/node_{EMBEDDER_ID}/embeddings.csv
+Output (per embedder):
+  /scratch3/.../embeddings/node_{EMBEDDER_ID}/
+    track_{id}/
+      {emb_name}.pt
+    embeddings.csv   ← track_index, artist_name, track_name, lyrics_source,
+                         embedding_path
 
 Usage:
-  sbatch embedder_audio.sh   # 20 audio jobs (array 0-19)
-  sbatch embedder_text.sh    #  5 text  jobs (array 5-9)
+  sbatch --array=0-9 embedder.sh
   # or manually:
-  python embedder.py --embedder_id 0 --sub_node 0 --total_sub_nodes 4
-  python embedder.py --embedder_id 5
+  python embedder.py --embedder_id 3
 """
 
 import argparse
@@ -45,14 +47,17 @@ import numpy as np
 import pandas as pd
 import torch
 
-# ── Args ───────────────────────────────────────────────────────────────────────
+# ── Embedder ID ────────────────────────────────────────────────────────────────
 
 _parser = argparse.ArgumentParser(add_help=False)
 _parser.add_argument("--embedder_id",     type=int, default=None)
 _parser.add_argument("--sub_node",        type=int, default=None,
-                     help="Sub-node index (0-based). Audio embedders only.")
+                     help="Sub-node index (0-based) for parallel resume splits.")
 _parser.add_argument("--total_sub_nodes", type=int, default=4,
-                     help="Total parallel sub-nodes for this embedder.")
+                     help="Total number of sub-nodes to split remaining work across.")
+_parser.add_argument("--resume_from",     type=int, default=None,
+                     help="Resume from this track_id onward. Auto-detected from "
+                          "existing CSVs if not set.")
 _args, _ = _parser.parse_known_args()
 
 if _args.embedder_id is not None:
@@ -62,8 +67,9 @@ elif "SLURM_ARRAY_TASK_ID" in os.environ:
 else:
     EMBEDDER_ID = 0
 
-SUB_NODE        = _args.sub_node
+SUB_NODE        = _args.sub_node         # None = no splitting (normal mode)
 TOTAL_SUB_NODES = _args.total_sub_nodes
+RESUME_FROM     = _args.resume_from      # None = auto-detect from max done track_id
 
 # ── Embedder registry ──────────────────────────────────────────────────────────
 
@@ -92,14 +98,12 @@ AUDIO_SR = EMBEDDER_MAP[EMBEDDER_ID].get("sr")   # None for text embedders
 
 _AUDIO_BATCH_ROOT  = "/scratch3/workspace/skandagatla_umass_edu-dolby/raw_audio_files/batch_2"
 _LYRICS_BATCH_ROOT = "/scratch3/workspace/skandagatla_umass_edu-dolby/lyrics/batch_2"
-_OUTPUT_ROOT       = "/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_2"
-
-NUM_DATA_NODES = 12   # batch_2 has 12 data nodes (node_0 … node_11)
+_OUTPUT_ROOT       = "/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings"
 
 OUTPUT_DIR = os.path.join(_OUTPUT_ROOT, f"node_{EMBEDDER_ID}")
 
-# Audio embedders write to per-sub-node CSVs to avoid write conflicts.
-# Text embedders write to a single embeddings.csv.
+# Sub-node resume: each parallel worker writes its own CSV to avoid race conditions.
+# Normal runs (no --sub_node) use the original embeddings.csv.
 if SUB_NODE is not None:
     MANIFEST_CSV = os.path.join(OUTPUT_DIR, f"embeddings_sub_{SUB_NODE}.csv")
 else:
@@ -124,11 +128,22 @@ def save_emb(track_id: int, tensor: torch.Tensor) -> None:
 
 # ── CSV helpers ────────────────────────────────────────────────────────────────
 
-def load_done_ids() -> set:
-    """Read this sub-node's own manifest to find already-completed tracks."""
-    if os.path.exists(MANIFEST_CSV):
-        return set(pd.read_csv(MANIFEST_CSV)["track_index"].tolist())
-    return set()
+def load_done_ids() -> tuple[set, int]:
+    """
+    Read all embeddings*.csv in OUTPUT_DIR.
+    Returns (done_ids, max_track_id) where max_track_id is the highest
+    track_index seen across all CSVs (used as the resume cutoff).
+    """
+    done = set()
+    for fname in os.listdir(OUTPUT_DIR):
+        if fname.startswith("embeddings") and fname.endswith(".csv"):
+            try:
+                df = pd.read_csv(os.path.join(OUTPUT_DIR, fname))
+                done.update(df["track_index"].tolist())
+            except Exception:
+                pass
+    max_id = max(done) if done else 0
+    return done, max_id
 
 def append_manifest(row: dict) -> None:
     write_header = not os.path.exists(MANIFEST_CSV)
@@ -138,11 +153,11 @@ def append_manifest(row: dict) -> None:
 
 def load_all_tracks() -> pd.DataFrame:
     """
-    Scan all NUM_DATA_NODES download_status CSVs.
+    Scan all 10 download_status CSVs.
     Returns DataFrame[track_index, data_node] for successfully downloaded tracks.
     """
     dfs = []
-    for dn in range(NUM_DATA_NODES):
+    for dn in range(10):
         csv_path = os.path.join(_AUDIO_BATCH_ROOT, f"download_status_node_{dn}.csv")
         if not os.path.exists(csv_path):
             print(f"  [WARN] Missing status CSV: {csv_path}")
@@ -161,12 +176,12 @@ def load_all_tracks() -> pd.DataFrame:
 
 def load_all_lyrics() -> pd.DataFrame:
     """
-    Combine all NUM_DATA_NODES master_lyrics CSVs.
+    Combine all 10 master_lyrics CSVs.
     Returns DataFrame[track_index, artist_name, track_name,
                        lyrics_source, lyrics, detected_language].
     """
     dfs = []
-    for dn in range(NUM_DATA_NODES):
+    for dn in range(10):
         csv_path = os.path.join(_LYRICS_BATCH_ROOT, f"master_lyrics_node_{dn}.csv")
         if not os.path.exists(csv_path):
             print(f"  [WARN] Missing lyrics CSV: {csv_path}")
@@ -345,54 +360,63 @@ def main():
     print(f"  Modality   : {MODALITY}" + (f"  @{AUDIO_SR} Hz" if AUDIO_SR else ""))
     print(f"  Output dir : {OUTPUT_DIR}")
     print(f"  Device     : {device.upper()}")
-    print(f"  Data nodes : {NUM_DATA_NODES}")
     if SUB_NODE is not None:
-        print(f"  Sub-node   : {SUB_NODE} / {TOTAL_SUB_NODES}")
+        print(f"  Sub-node   : {SUB_NODE} / {TOTAL_SUB_NODES}  (resume split)")
         print(f"  Manifest   : {MANIFEST_CSV}")
     print(f"{'=' * 64}\n")
 
-    # ── Build full track list from all 12 data nodes ──────────────────────────
+    # ── Build full track list from all 10 data nodes ──────────────────────────
     print("Loading track index...")
-    tracks_df = load_all_tracks()
+    tracks_df = load_all_tracks()    # track_index, data_node
 
     print("Loading lyrics index...")
-    lyrics_df = load_all_lyrics()
+    lyrics_df = load_all_lyrics()    # track_index, artist_name, track_name, lyrics, ...
 
-    merged = (
-        tracks_df.merge(
-            lyrics_df[["track_index", "artist_name", "track_name", "lyrics_source", "lyrics"]],
-            on="track_index",
-            how="left",
-        )
+    merged = tracks_df.merge(
+        lyrics_df[["track_index", "artist_name", "track_name", "lyrics_source", "lyrics"]],
+        on="track_index",
+        how="left",
+    )
+
+    total = len(merged)
+    if total == 0:
+        print("[WARN] No tracks found across all nodes.")
+        return
+
+    print(f"\nTotal tracks : {total}  "
+          f"(IDs {merged['track_index'].min()} – {merged['track_index'].max()})")
+
+    done_ids, max_done_id = load_done_ids()
+    if done_ids:
+        print(f"Resuming     : {len(done_ids)} tracks already done (max track_id={max_done_id}).")
+
+    # Determine the cutoff: skip everything up to and including the last processed track.
+    # This ignores skipped/failed tracks from the original run so we don't re-attempt them.
+    cutoff = RESUME_FROM if RESUME_FROM is not None else max_done_id
+    print(f"Cutoff       : track_index > {cutoff}")
+
+    # Sort by track_index and keep only tracks strictly beyond the cutoff.
+    remaining_df = (
+        merged[merged["track_index"] > cutoff]
         .sort_values("track_index")
         .reset_index(drop=True)
     )
 
-    total_all = len(merged)
-    if total_all == 0:
-        print("[WARN] No tracks found across all nodes.")
-        return
-
-    # ── Apply contiguous sub-node split for audio embedders ──────────────────
     if SUB_NODE is not None:
-        size  = total_all // TOTAL_SUB_NODES
-        start = SUB_NODE * size
-        end   = start + size if SUB_NODE < TOTAL_SUB_NODES - 1 else total_all
-        merged = merged.iloc[start:end].reset_index(drop=True)
-        print(f"\nSub-node {SUB_NODE} slice : {len(merged)} tracks  "
-              f"(track_ids {merged['track_index'].iloc[0]} – {merged['track_index'].iloc[-1]})")
+        # Contiguous split: divide remaining tracks into TOTAL_SUB_NODES sequential chunks.
+        n      = len(remaining_df)
+        size   = n // TOTAL_SUB_NODES
+        start  = SUB_NODE * size
+        end    = start + size if SUB_NODE < TOTAL_SUB_NODES - 1 else n  # last node gets remainder
+        remaining_df = remaining_df.iloc[start:end].reset_index(drop=True)
+        first_id = remaining_df["track_index"].iloc[0]  if len(remaining_df) else "—"
+        last_id  = remaining_df["track_index"].iloc[-1] if len(remaining_df) else "—"
+        print(f"Sub-node {SUB_NODE} slice : {len(remaining_df)} tracks  "
+              f"(track_ids {first_id} – {last_id})\n")
     else:
-        print(f"\nTotal tracks : {total_all}  "
-              f"(IDs {merged['track_index'].min()} – {merged['track_index'].max()})")
+        print(f"Remaining    : {len(remaining_df)}\n")
 
-    done_ids = load_done_ids()
-    if done_ids:
-        print(f"Resuming     : {len(done_ids)} tracks already done.")
-
-    remaining = len(merged) - len(done_ids)
-    print(f"Remaining    : {remaining}\n")
-
-    if remaining == 0:
+    if len(remaining_df) == 0:
         print("Nothing to do.")
         return
 
@@ -400,17 +424,14 @@ def main():
     model = load_model()
 
     # ── Process tracks ────────────────────────────────────────────────────────
-    total = len(merged)
-    for idx, row in merged.iterrows():
+    total = len(remaining_df)
+    for idx, row in remaining_df.iterrows():
         track_id   = int(row["track_index"])
         data_node  = int(row["data_node"])
         artist     = str(row.get("artist_name", "")) if pd.notna(row.get("artist_name")) else ""
         track      = str(row.get("track_name",  "")) if pd.notna(row.get("track_name"))  else ""
-        lyrics     = str(row["lyrics"])        if pd.notna(row.get("lyrics"))        else ""
+        lyrics     = str(row["lyrics"])       if pd.notna(row.get("lyrics"))       else ""
         lyrics_src = str(row["lyrics_source"]) if pd.notna(row.get("lyrics_source")) else "unknown"
-
-        if track_id in done_ids:
-            continue
 
         print(f"\n[{idx+1}/{total}] track_{track_id} | {artist} — {track}")
 
@@ -435,7 +456,7 @@ def main():
             print(f"  Embedding with {EMB_NAME}...")
             emb = run_embedder(audio, lyrics, model)
             save_emb(track_id, emb)
-            print(f"  Saved  shape={list(emb.shape)}  → {EMB_NAME}_{track_id}.pt")
+            print(f"  Saved  shape={list(emb.shape)}  → track_{track_id}/{EMB_NAME}.pt")
 
             append_manifest({
                 "track_index":    track_id,
@@ -444,7 +465,6 @@ def main():
                 "lyrics_source":  lyrics_src,
                 "embedding_path": emb_path(track_id),
             })
-            done_ids.add(track_id)
 
         except Exception as e:
             print(f"  [ERROR] track_{track_id}: {e}")
