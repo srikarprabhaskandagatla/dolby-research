@@ -38,5 +38,12 @@ finetune/finetune.sh
 
 models
 
+cf_pretrain/
+dataset/session_embed_pipeline/encoder/__pycache__
+finetune/exp1
+finetune/logs
+finetune/datasets
+finetune/__pycache__
+finetune/utils/__pycache__
 
 /.claude
